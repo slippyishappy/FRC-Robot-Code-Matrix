@@ -39,8 +39,8 @@ public class Robot extends TimedRobot {
   private static final int       CURRENT_LIMIT = 35;
 
   // Sécurité courant
-  private static final double MAX_INTAKE_CURRENT = 30.0;
-  private static final double MAX_OUTAKE_CURRENT = 30.0;
+  private static final double MAX_INTAKE_CURRENT = 30;
+  private static final double MAX_OUTAKE_CURRENT = 30;
 
   // Brownout
   private static final double BROWNOUT_VOLTAGE = 7.0;
@@ -61,7 +61,8 @@ public class Robot extends TimedRobot {
   private static final double DEADBAND      = 0.08;
   private static final double SLEW_SPEED    = 3.5;
   private static final double SLEW_ROTATION = 4.5;
-  private static final double SLEW_INTAKE   = 5.0;
+  private static final double SLEW_INTAKE   = 20.0;
+  private static final double SLEW_OUTAKE   = 20.0;    
 
   // Preferences
   private static final String PREF_SPEED_MODE = "speedMode";
@@ -87,7 +88,7 @@ public class Robot extends TimedRobot {
   private final SlewRateLimiter speedLimiter    = new SlewRateLimiter(SLEW_SPEED);
   private final SlewRateLimiter rotationLimiter = new SlewRateLimiter(SLEW_ROTATION);
   private final SlewRateLimiter intakeLimiter   = new SlewRateLimiter(SLEW_INTAKE);
-  private final SlewRateLimiter outakeLimiter   = new SlewRateLimiter(SLEW_INTAKE);
+  private final SlewRateLimiter outakeLimiter   = new SlewRateLimiter(SLEW_OUTAKE);
 
   // État boutons
   private boolean prevA        = false;
@@ -118,8 +119,8 @@ public class Robot extends TimedRobot {
     rightFollower = safeCreateFollower(RIGHT_FOLLOWER_ID, rightLeader, false, "RIGHT_FOLLOWER");
 
     // Intake / Outake
-    intakeMotor = safeCreateMotor(INTAKE_ID, false, "INTAKE");
-    outakeMotor = safeCreateMotor(OUTAKE_ID, false, "OUTAKE");
+    intakeMotor = safeCreateMotor(INTAKE_ID, true,"INTAKE");
+    outakeMotor = safeCreateMotor(OUTAKE_ID, true, "OUTAKE");
 
     // DifferentialDrive
     if (leftLeader != null && rightLeader != null) {
@@ -220,18 +221,31 @@ public class Robot extends TimedRobot {
       drive.arcadeDrive(speed, rotation, false);
     }
 
-    // ----- INTAKE : Axis Z → vitesse MAXIMUM dans le sens du joystick -----
-    double zRaw = rawStick.getZ();
-    // ✅ Si joystick dépasse le seuil → on force à ±INTAKE_MAX_SPEED (pas proportionnel)
-    double intakeCmd = 0.0;
-    if (zRaw > AXIS_THRESHOLD)       intakeCmd = +INTAKE_MAX_SPEED;  // Z+ = 100%
-    else if (zRaw < -AXIS_THRESHOLD) intakeCmd = -INTAKE_MAX_SPEED;  // Z- = -100%
+     // ----- Lecture des axes Z (triggers) et ZRot -----
+double zRaw = rawStick.getZ();        // Trigger gauche/droit pour intake
+double zRotRaw = rawStick.getTwist(); // Triggers pour outake
 
-    // ----- OUTAKE : Axis ZRot → vitesse MAXIMUM dans le sens du joystick -----
-    double zRotRaw = rawStick.getTwist();
-    double outakeCmd = 0.0;
-    if (zRotRaw > AXIS_THRESHOLD)       outakeCmd = +OUTAKE_MAX_SPEED;  // ZR+ = 100%
-    else if (zRotRaw < -AXIS_THRESHOLD) outakeCmd = -OUTAKE_MAX_SPEED;  // ZR- = -100%
+// ----- Commandes normales avec les axes (triggers) -----
+double intakeCmd = 0.0;
+if (zRaw > AXIS_THRESHOLD) intakeCmd = +INTAKE_MAX_SPEED;
+else if (zRaw < -AXIS_THRESHOLD) intakeCmd = -INTAKE_MAX_SPEED;
+
+double outakeCmd = 0.0;
+if (zRotRaw > AXIS_THRESHOLD) outakeCmd = +OUTAKE_MAX_SPEED;
+else if (zRotRaw < -AXIS_THRESHOLD) outakeCmd = -OUTAKE_MAX_SPEED;
+
+// ----- BUMPERS : activation avec sens spécifique -----
+boolean leftBumper = controller.getLeftBumper();   // LB = Intake en sens INVERSE
+boolean rightBumper = controller.getRightBumper(); // RB = Outake en sens NORMAL
+
+if (leftBumper) {
+    // LB active l'intake en sens INVERSE (-)
+    intakeCmd = -INTAKE_MAX_SPEED;
+} 
+if (rightBumper) {
+    // RB active l'outake en sens NORMAL (+)
+    outakeCmd = +OUTAKE_MAX_SPEED;
+}
 
     handleIntakeOutake(intakeCmd, outakeCmd);
 
@@ -327,17 +341,21 @@ public class Robot extends TimedRobot {
       }
     }
 
-    // Priorité outake > intake — vitesse max dans le sens du joystick
-    if (outakeCmd != 0.0 && !outakeOverheat) {
-      if (outakeMotor != null) outakeMotor.set(outakeLimiter.calculate(outakeCmd));
-      if (intakeMotor != null) { intakeLimiter.reset(0.0); intakeMotor.set(0.0); }
-    } else if (intakeCmd != 0.0 && !intakeOverheat) {
-      if (intakeMotor != null) intakeMotor.set(intakeLimiter.calculate(intakeCmd));
-      if (outakeMotor != null) { outakeLimiter.reset(0.0); outakeMotor.set(0.0); }
-    } else {
-      if (intakeMotor != null) { intakeLimiter.reset(0.0); intakeMotor.set(0.0); }
-      if (outakeMotor != null) { outakeLimiter.reset(0.0); outakeMotor.set(0.0); }
-    }
+  
+    // Gestion INDÉPENDANTE sans limiteurs
+// INTAKE
+if (intakeCmd != 0.0 && !intakeOverheat) {
+    if (intakeMotor != null) intakeMotor.set(intakeCmd);  // Direct, sans limiteur
+} else {
+    if (intakeMotor != null) intakeMotor.set(0.0);
+}
+
+// OUTAKE (indépendant)
+if (outakeCmd != 0.0 && !outakeOverheat) {
+    if (outakeMotor != null) outakeMotor.set(outakeCmd);  // Direct, sans limiteur
+} else {
+    if (outakeMotor != null) outakeMotor.set(0.0);
+}
 
     // Logs au changement
     boolean intakeOn = intakeCmd != 0.0;
