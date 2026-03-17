@@ -101,6 +101,15 @@ public class Robot extends TimedRobot {
 
   // Gyro
   private boolean tiltAlerted = false;
+  private Timer bumperTimer = new Timer();
+
+
+  private boolean leftBumperWasPressed = false;
+  private boolean rightBumperWasPressed = false;
+  private boolean leftBumperActive = false;
+  private boolean rightBumperActive = false;
+  private boolean intakeDelayPassed = false;
+  private boolean outakeDelayPassed = false;
 
   // ===================== ROBOT INIT =====================
 
@@ -234,18 +243,81 @@ double outakeCmd = 0.0;
 if (zRotRaw > AXIS_THRESHOLD) outakeCmd = +OUTAKE_MAX_SPEED;
 else if (zRotRaw < -AXIS_THRESHOLD) outakeCmd = -OUTAKE_MAX_SPEED;
 
-// ----- BUMPERS : activation avec sens spécifique -----
-boolean leftBumper = controller.getLeftBumper();   // LB = Intake en sens INVERSE
-boolean rightBumper = controller.getRightBumper(); // RB = Outake en sens NORMAL
+       // ----- BUMPERS : Outake immédiat, Intake après 3 sec -----
+    boolean leftBumper = controller.getLeftBumper();   // LB
+    boolean rightBumper = controller.getRightBumper(); // RB
 
-if (leftBumper) {
-    // LB active l'intake en sens INVERSE (-)
-    intakeCmd = -INTAKE_MAX_SPEED;
-} 
-if (rightBumper) {
-    // RB active l'outake en sens NORMAL (+)
-    outakeCmd = +OUTAKE_MAX_SPEED;
-}
+    // Pour LEFT BUMPER
+    if (leftBumper) {
+        if (!leftBumperWasPressed) {
+            // Bouton vient d'être pressé
+            bumperTimer.reset();
+            bumperTimer.start();
+            leftBumperActive = true;
+            leftBumperWasPressed = true;
+            intakeDelayPassed = false;
+            System.out.println("[LB] Outake START - Attend 3 sec pour intake");
+        }
+        
+        // Toujours faire tourner l'outake quand le bouton est pressé
+        outakeCmd = +OUTAKE_MAX_SPEED;  // Outake immédiat
+        
+        // Vérifier si 3 secondes sont passées pour démarrer l'intake
+        if (leftBumperActive && bumperTimer.hasElapsed(3.0) && !intakeDelayPassed) {
+            intakeDelayPassed = true;
+            System.out.println("[LB] 3 sec passées - Intake START");
+        }
+        
+        // Si le délai est passé, démarrer l'intake
+        if (intakeDelayPassed) {
+            intakeCmd = -INTAKE_MAX_SPEED;  // Intake en sens inverse
+        }
+        
+    } else {
+        // Bouton relâché - tout arrêter
+        if (leftBumperWasPressed) {
+            System.out.println("[LB] Relâché - arrêt total");
+        }
+        leftBumperWasPressed = false;
+        leftBumperActive = false;
+        intakeDelayPassed = false;
+        intakeCmd = 0;
+        outakeCmd = 0;
+    }
+
+    // Pour RIGHT BUMPER (même logique mais avec tes vitesses)
+    if (rightBumper) {
+        if (!rightBumperWasPressed) {
+            bumperTimer.reset();
+            bumperTimer.start();
+            rightBumperActive = true;
+            rightBumperWasPressed = true;
+            outakeDelayPassed = false;
+            System.out.println("[RB] Outake START - Attend 3 sec pour intake");
+        }
+        
+        outakeCmd = +OUTAKE_MAX_SPEED;  // Outake immédiat
+        
+        if (rightBumperActive && bumperTimer.hasElapsed(3.0) && !outakeDelayPassed) {
+            outakeDelayPassed = true;
+            System.out.println("[RB] 3 sec passées - Intake START");
+        }
+        
+        if (outakeDelayPassed) {
+            intakeCmd = +INTAKE_MAX_SPEED;  // Intake en sens normal
+        }
+        
+    } else {
+        if (rightBumperWasPressed) {
+            System.out.println("[RB] Relâché - arrêt total");
+        }
+        rightBumperWasPressed = false;
+        rightBumperActive = false;
+        outakeDelayPassed = false;
+        outakeCmd = 0;
+        intakeCmd = 0;
+    }
+
 
     handleIntakeOutake(intakeCmd, outakeCmd);
 
